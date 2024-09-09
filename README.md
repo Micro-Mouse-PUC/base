@@ -29,3 +29,6 @@ Seu objetivo é simples: coletar todos os queijos espalhados pelo labirinto ante
           
 </div>  
 ## Metodologia:
+
+* Metodologia ágil Scrum.
+* Kanban.
