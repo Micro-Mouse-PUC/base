@@ -3,48 +3,80 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class GenerateMaze : MonoBehaviour
+public class GenerateMaze: MonoBehaviour
 {
-    [SerializeField]
-    private GameObject roomPrefab;
+    [Header("Room Prefab")]
+    [SerializeField] private GameObject roomPrefab;
 
-    // The grid to hold all room instances
+    [Header("Maze Dimensions")]
+    [SerializeField] private int numX = 50; // Número de salas ao longo do eixo X
+    [SerializeField] private int numY = 50; // Número de salas ao longo do eixo Y
+
+    // Array 2D para armazenar referências a todas as salas
     private Room[,] rooms;
 
-    [SerializeField]
-    private int numX = 10; // Number of rooms along the X-axis
-    [SerializeField]
-    private int numY = 10; // Number of rooms along the Y-axis
+    // Pilha para retrocesso durante o algoritmo de Busca em Profundidade (DFS)
+    private Stack<Room> stack = new Stack<Room>();
 
-    // Dimensions of each room
+    // Flag para indicar se a geração do labirinto está em andamento
+    private bool generating = false;
+
+    // Dimensões de cada sala
     private float roomWidth;
     private float roomHeight;
 
-    // Stack for backtracking during maze generation
-    private Stack<Room> stack = new Stack<Room>();
+    /// <summary>
+    /// Inicializa o labirinto criando instâncias das salas e configurando a grade.
+    /// </summary>
+    private void Start()
+    {
+        if (roomPrefab == null)
+        {
+            Debug.LogError("Room Prefab não está atribuído em GenerateMaze.");
+            return;
+        }
 
-    // Flag to indicate if maze generation is in progress
-    private bool generating = false;
+        // Determina o tamanho da sala com base nos limites do SpriteRenderer do prefab
+        CalculateRoomSize();
+
+        // Inicializa o array de salas
+        rooms = new Room[numX, numY];
+
+        // Instancia as salas e as posiciona na grade
+        for (int x = 0; x < numX; x++)
+        {
+            for (int y = 0; y < numY; y++)
+            {
+                Vector3 position = new Vector3(x * roomWidth, y * roomHeight, 0f);
+                GameObject roomObj = Instantiate(roomPrefab, position, Quaternion.identity, this.transform);
+                roomObj.name = $"Room_{x}_{y}";
+                Room room = roomObj.GetComponent<Room>();
+
+                if (room == null)
+                {
+                    Debug.LogError($"Room Prefab em ({x}, {y}) não possui um componente Room.");
+                    continue;
+                }
+
+                room.Index = new Vector2Int(x, y);
+                rooms[x, y] = room;
+            }
+        }
+
+        // Inicia a geração do labirinto
+        StartCoroutine(GenerateMazeCoroutine());
+    }
 
     /// <summary>
-    /// Entrance and Exit configurations
+    /// Calcula a largura e altura de uma sala com base nos SpriteRenderers do prefab.
     /// </summary>
-    private Vector2Int entrance = new Vector2Int(0, 0); // (x, y) for entrance
-    private Room.Directions entranceDirection = Room.Directions.BOTTOM; // Direction to remove for entrance
-
-    private Vector2Int exit = new Vector2Int(9, 9); // (x, y) for exit (adjust based on numX and numY)
-    private Room.Directions exitDirection = Room.Directions.RIGHT; // Direction to remove for exit
-
-    /// <summary>
-    /// Calculates the size of a room based on its sprite renderers.
-    /// </summary>
-    private void GetRoomSize()
+    private void CalculateRoomSize()
     {
         SpriteRenderer[] spriteRenderers = roomPrefab.GetComponentsInChildren<SpriteRenderer>();
 
         if (spriteRenderers.Length == 0)
         {
-            Debug.LogError("Room prefab has no SpriteRenderers.");
+            Debug.LogError("Room Prefab não possui SpriteRenderers.");
             return;
         }
 
@@ -59,296 +91,185 @@ public class GenerateMaze : MonoBehaviour
 
         roomWidth = maxBounds.x - minBounds.x;
         roomHeight = maxBounds.y - minBounds.y;
+
+        Debug.Log($"Tamanho da Sala - Largura: {roomWidth}, Altura: {roomHeight}");
     }
 
     /// <summary>
-    /// Positions and sizes the camera to fit the entire maze.
+    /// Coroutine para gerar o labirinto utilizando o algoritmo de Busca em Profundidade (DFS).
     /// </summary>
-    private void SetCamera()
+    private IEnumerator GenerateMazeCoroutine()
     {
-        if (Camera.main == null)
+        if (generating)
+            yield break;
+
+        generating = true;
+
+        // Reseta todas as salas antes da geração
+        ResetRooms();
+
+        // Escolhe a sala inicial (0, 0)
+        Room startRoom = rooms[0, 0];
+        startRoom.Visited = true;
+        stack.Push(startRoom);
+        Debug.Log($"Iniciando a geração do labirinto a partir da sala ({startRoom.Index.x}, {startRoom.Index.y})");
+
+        while (stack.Count > 0)
         {
-            Debug.LogError("Main Camera not found.");
-            return;
-        }
+            Room currentRoom = stack.Peek();
+            List<Room.Directions> unvisitedDirections = GetUnvisitedDirections(currentRoom);
 
-        Camera.main.transform.position = new Vector3(
-            numX * roomWidth / 2 - roomWidth / 2,
-            numY * roomHeight / 2 - roomHeight / 2,
-            -10.0f); // Standard Z position for 2D cameras
-
-        // Adjust orthographic size to fit the maze
-        float orthographicSizeX = (numX * roomWidth) / (2f * Camera.main.aspect);
-        float orthographicSizeY = (numY * roomHeight) / 2f;
-        Camera.main.orthographicSize = Mathf.Max(orthographicSizeX, orthographicSizeY) * 1.1f; // Added padding
-    }
-
-    /// <summary>
-    /// Initializes the maze grid by instantiating room prefabs.
-    /// </summary>
-    private void Start()
-    {
-        GetRoomSize();
-
-        rooms = new Room[numX, numY];
-
-        for (int i = 0; i < numX; ++i)
-        {
-            for (int j = 0; j < numY; ++j)
+            if (unvisitedDirections.Count > 0)
             {
-                Vector3 position = new Vector3(i * roomWidth, j * roomHeight, 0.0f);
-                GameObject roomObj = Instantiate(roomPrefab, position, Quaternion.identity, transform);
-                roomObj.name = $"Room_{i}_{j}";
-                Room room = roomObj.GetComponent<Room>();
+                // Escolhe uma direção aleatória
+                int randIndex = UnityEngine.Random.Range(0, unvisitedDirections.Count);
+                Room.Directions chosenDir = unvisitedDirections[randIndex];
 
-                if (room == null)
+                // Determina as coordenadas do vizinho com base na direção escolhida
+                Vector2Int neighborPos = GetNeighborPosition(currentRoom.Index, chosenDir);
+
+                if (IsWithinBounds(neighborPos))
                 {
-                    Debug.LogError($"Room prefab at position ({i}, {j}) does not have a Room component.");
-                    continue;
-                }
+                    Room neighborRoom = rooms[neighborPos.x, neighborPos.y];
 
-                room.Index = new Vector2Int(i, j);
-                rooms[i, j] = room;
+                    if (neighborRoom != null && !neighborRoom.Visited)
+                    {
+                        // Remove as paredes entre a salaAtual e a salaVizinha
+                        currentRoom.RemoveWall(chosenDir);
+                        neighborRoom.RemoveWall(Room.GetOppositeDirection(chosenDir));
+
+                        // Marca a sala vizinha como visitada e a adiciona à pilha
+                        neighborRoom.Visited = true;
+                        stack.Push(neighborRoom);
+
+                        Debug.Log($"Conectou Sala ({currentRoom.Index.x}, {currentRoom.Index.y}) à Sala ({neighborRoom.Index.x}, {neighborRoom.Index.y}) via {chosenDir}");
+                    }
+                }
             }
+            else
+            {
+                // Retrocede se não houver vizinhos não visitados
+                Room backtrackedRoom = stack.Pop();
+                Debug.Log($"Retrocedendo para a Sala ({backtrackedRoom.Index.x}, {backtrackedRoom.Index.y})");
+            }
+
+            // Aguarda o próximo quadro para evitar congelamento
+            yield return null;
         }
 
-        SetCamera();
+        generating = false;
+        Debug.Log("Geração do labirinto concluída!");
+
+        // Após a geração, oculta o primeiro bloco base
+        HideBaseBlock();
     }
 
     /// <summary>
-    /// Removes a wall from a specified room and its neighboring room.
+    /// Oculta o primeiro bloco base após a geração do labirinto.
     /// </summary>
-    /// <param name="x">X-coordinate of the room.</param>
-    /// <param name="y">Y-coordinate of the room.</param>
-    /// <param name="dir">Direction of the wall to remove.</param>
-    /// <param name="isBoundary">Indicates if the wall removal is for the maze boundary (entrance/exit).</param>
-    private void RemoveRoomWall(int x, int y, Room.Directions dir, bool isBoundary = false)
+    public void HideBaseBlock()
     {
-        // Check if we're removing a boundary wall (excluding entrance and exit)
-        if (isBoundary)
-        {
-            bool isEntrance = (x == entrance.x && y == entrance.y && dir == entranceDirection);
-            bool isExit = (x == exit.x && y == exit.y && dir == exitDirection);
+        // Encontra todos os objetos com a tag "BaseBlock"
+        GameObject[] baseBlocks = GameObject.FindGameObjectsWithTag("BaseBlock");
 
-            if (!isEntrance && !isExit)
-            {
-                Debug.LogWarning($"Attempted to remove a boundary wall not designated as entrance or exit at ({x},{y}) {dir}");
-                return;
-            }
+        // Garante que pelo menos um bloco base seja encontrado
+        if (baseBlocks.Length > 0)
+        {
+            // Oculta apenas o primeiro bloco base
+            baseBlocks[0].SetActive(false);  // Oculta o primeiro bloco base após a geração
+            Debug.Log($"Primeiro bloco base '{baseBlocks[0].name}' foi ocultado.");
         }
         else
         {
-            // Prevent the removal of boundary walls (outermost edges of the maze)
-            if ((x == 0 && dir == Room.Directions.LEFT) ||
-                (x == numX - 1 && dir == Room.Directions.RIGHT) ||
-                (y == 0 && dir == Room.Directions.BOTTOM) ||
-                (y == numY - 1 && dir == Room.Directions.TOP))
-            {
-                Debug.LogWarning($"Attempted to remove an outer boundary wall at ({x},{y}) {dir}");
-                return;
-            }
-
-            // Additional check for corners to ensure walls stay closed
-            if ((x == 0 && y == 0 && (dir == Room.Directions.LEFT || dir == Room.Directions.BOTTOM)) ||
-                (x == numX - 1 && y == 0 && (dir == Room.Directions.RIGHT || dir == Room.Directions.BOTTOM)) ||
-                (x == 0 && y == numY - 1 && (dir == Room.Directions.LEFT || dir == Room.Directions.TOP)) ||
-                (x == numX - 1 && y == numY - 1 && (dir == Room.Directions.RIGHT || dir == Room.Directions.TOP)))
-            {
-                Debug.LogWarning($"Attempted to remove a corner boundary wall at ({x},{y}) {dir}");
-                return;
-            }
-        }
-
-        // Proceed to remove the wall normally
-        rooms[x, y].SetDirFlag(dir, false);
-        Debug.Log($"Removed wall {dir} from room ({x},{y})");
-
-        // Determine the opposite direction and the neighboring room's coordinates
-        Room.Directions oppositeDir = Room.GetOppositeDirection(dir);
-        int neighborX = x, neighborY = y;
-
-        switch (dir)
-        {
-            case Room.Directions.TOP:
-                neighborY += 1;
-                break;
-            case Room.Directions.RIGHT:
-                neighborX += 1;
-                break;
-            case Room.Directions.BOTTOM:
-                neighborY -= 1;
-                break;
-            case Room.Directions.LEFT:
-                neighborX -= 1;
-                break;
-            default:
-                Debug.LogWarning($"Invalid direction {dir} provided for wall removal.");
-                return;
-        }
-
-        // Remove the opposite wall from the neighboring room if within bounds
-        if (neighborX >= 0 && neighborX < numX && neighborY >= 0 && neighborY < numY)
-        {
-            rooms[neighborX, neighborY].SetDirFlag(oppositeDir, false);
-            Debug.Log($"Removed wall {oppositeDir} from neighboring room ({neighborX},{neighborY})");
+            Debug.LogWarning("Nenhum bloco base encontrado com a tag 'BaseBlock'.");
         }
     }
 
+    /// <summary>
+    /// Reseta todas as salas para seu estado inicial.
+    /// </summary>
+    private void ResetRooms()
+    {
+        foreach (Room room in rooms)
+        {
+            if (room != null)
+            {
+                room.Visited = false;
+                // Reativa todas as paredes
+                foreach (Room.Directions dir in Enum.GetValues(typeof(Room.Directions)))
+                {
+                    if (dir == Room.Directions.NONE)
+                        continue;
 
+                    room.ActivateWall(dir);
+                }
+            }
+        }
+
+        // Limpa a pilha
+        stack.Clear();
+        Debug.Log("Todas as salas foram resetadas.");
+    }
 
     /// <summary>
-    /// Retrieves all unvisited neighboring rooms of a given room.
+    /// Obtém todas as direções não visitadas a partir da sala atual.
     /// </summary>
-    /// <param name="cx">Current room's X-coordinate.</param>
-    /// <param name="cy">Current room's Y-coordinate.</param>
-    /// <returns>List of tuples containing the direction and the neighboring room.</returns>
-    private List<Tuple<Room.Directions, Room>> GetNeighboursNotVisited(int cx, int cy)
+    /// <param name="room">Sala atual.</param>
+    /// <returns>Lista de direções não visitadas.</returns>
+    private List<Room.Directions> GetUnvisitedDirections(Room room)
     {
-        List<Tuple<Room.Directions, Room>> neighbours = new List<Tuple<Room.Directions, Room>>();
+        List<Room.Directions> directions = new List<Room.Directions>();
 
         foreach (Room.Directions dir in Enum.GetValues(typeof(Room.Directions)))
         {
             if (dir == Room.Directions.NONE)
                 continue;
 
-            int nx = cx, ny = cy;
-            switch (dir)
-            {
-                case Room.Directions.TOP:
-                    ny += 1;
-                    break;
-                case Room.Directions.RIGHT:
-                    nx += 1;
-                    break;
-                case Room.Directions.BOTTOM:
-                    ny -= 1;
-                    break;
-                case Room.Directions.LEFT:
-                    nx -= 1;
-                    break;
-            }
+            Vector2Int neighborPos = GetNeighborPosition(room.Index, dir);
 
-            // Check bounds
-            if (nx >= 0 && nx < numX && ny >= 0 && ny < numY)
+            if (IsWithinBounds(neighborPos))
             {
-                Room neighbour = rooms[nx, ny];
-                if (!neighbour.visited)
+                Room neighbor = rooms[neighborPos.x, neighborPos.y];
+                if (neighbor != null && !neighbor.Visited)
                 {
-                    neighbours.Add(new Tuple<Room.Directions, Room>(dir, neighbour));
+                    directions.Add(dir);
                 }
             }
         }
 
-        return neighbours;
+        return directions;
     }
 
     /// <summary>
-    /// Performs a single step in the maze generation algorithm.
+    /// Calcula a posição do vizinho com base na posição atual e na direção.
     /// </summary>
-    /// <returns>True if maze generation is complete; otherwise, false.</returns>
-    private bool GenerateStep()
+    /// <param name="current">Posição atual da sala.</param>
+    /// <param name="dir">Direção para o vizinho.</param>
+    /// <returns>Posição do vizinho.</returns>
+    private Vector2Int GetNeighborPosition(Vector2Int current, Room.Directions dir)
     {
-        if (stack.Count == 0)
-            return true; // Generation complete
-
-        Room currentRoom = stack.Peek();
-        List<Tuple<Room.Directions, Room>> neighbours = GetNeighboursNotVisited(currentRoom.Index.x, currentRoom.Index.y);
-
-        if (neighbours.Count > 0)
+        switch (dir)
         {
-            // Choose a random unvisited neighbor
-            int randIndex = UnityEngine.Random.Range(0, neighbours.Count);
-            var chosen = neighbours[randIndex];
-            Room.Directions direction = chosen.Item1;
-            Room neighbour = chosen.Item2;
-
-            // Remove the wall between the current room and the chosen neighbor
-            RemoveRoomWall(currentRoom.Index.x, currentRoom.Index.y, direction);
-            Debug.Log($"Connecting room ({currentRoom.Index.x},{currentRoom.Index.y}) to room ({neighbour.Index.x},{neighbour.Index.y}) via {direction}");
-
-            // Mark the neighbor as visited and push it to the stack
-            neighbour.visited = true;
-            stack.Push(neighbour);
+            case Room.Directions.TOP:
+                return new Vector2Int(current.x, current.y + 1);
+            case Room.Directions.RIGHT:
+                return new Vector2Int(current.x + 1, current.y);
+            case Room.Directions.BOTTOM:
+                return new Vector2Int(current.x, current.y - 1);
+            case Room.Directions.LEFT:
+                return new Vector2Int(current.x - 1, current.y);
+            default:
+                return current;
         }
-        else
-        {
-            // Backtrack if no unvisited neighbors
-            Room backtrackedRoom = stack.Pop();
-            Debug.Log($"Backtracking to room ({backtrackedRoom.Index.x},{backtrackedRoom.Index.y})");
-        }
-
-        return false; // Generation not yet complete
     }
 
     /// <summary>
-    /// Initiates the maze generation process.
+    /// Verifica se a posição fornecida está dentro dos limites do labirinto.
     /// </summary>
-    public void CreateMaze()
+    /// <param name="pos">Posição a ser verificada.</param>
+    /// <returns>Verdadeiro se estiver dentro dos limites, caso contrário, falso.</returns>
+    private bool IsWithinBounds(Vector2Int pos)
     {
-        if (generating)
-            return; // Prevent multiple simultaneous generations
-
-        ResetMaze();
-
-        // Define entrance and exit
-        //RemoveRoomWall(entrance.x, entrance.y, entranceDirection, true); // Entrance
-        //#RemoveRoomWall(exit.x, exit.y, exitDirection, true); // Exit
-
-        // Start from the entrance
-        Room startingRoom = rooms[entrance.x, entrance.y];
-        startingRoom.visited = true; // Mark as visited
-        stack.Push(startingRoom);
-        Debug.Log($"Starting maze generation from room ({entrance.x},{entrance.y})");
-
-        // Start the coroutine for step-by-step generation
-        StartCoroutine(Coroutine_Generate());
-    }
-
-    /// <summary>
-    /// Coroutine that handles the maze generation over time.
-    /// </summary>
-    /// <returns>IEnumerator for the coroutine.</returns>
-    private IEnumerator Coroutine_Generate()
-    {
-        generating = true;
-        bool generationComplete = false;
-
-        while (!generationComplete)
-        {
-            generationComplete = GenerateStep();
-            yield return new WaitForSeconds(0.02f); // Adjust speed as needed
-        }
-
-        generating = false;
-        Debug.Log("Maze generation complete!");
-    }
-
-    /// <summary>
-    /// Resets the maze to its initial state.
-    /// </summary>
-    private void ResetMaze()
-    {
-        foreach (Room room in rooms)
-        {
-            room.visited = false;
-            room.SetDirFlag(Room.Directions.TOP, true);
-            room.SetDirFlag(Room.Directions.RIGHT, true);
-            room.SetDirFlag(Room.Directions.BOTTOM, true);
-            room.SetDirFlag(Room.Directions.LEFT, true);
-        }
-
-        stack.Clear();
-        Debug.Log("Maze has been reset.");
-    }
-
-    /// <summary>
-    /// Listens for user input to start maze generation.
-    /// </summary>
-    private void Update()
-    {
-        if (Input.GetKeyDown(KeyCode.Space) && !generating)
-        {
-            CreateMaze();
-        }
+        return pos.x >= 0 && pos.x < numX && pos.y >= 0 && pos.y < numY;
     }
 }
