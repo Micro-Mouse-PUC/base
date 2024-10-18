@@ -9,7 +9,7 @@ public class Cat : MonoBehaviour
     private Transform player;
 
     // Speed at which the cat moves
-    public float speed = 2f;
+    public float speed = 6f;
 
     // Reference to Rigidbody2D
     private Rigidbody2D rb;
