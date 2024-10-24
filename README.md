@@ -1,8 +1,26 @@
+# [Nome do projeto]
+
+[Escreva um ou dois  parágrafo resumindo o objetivo do seu projeto.]
+
+## Alunos integrantes da equipe
+
+* [Nome completo do aluno 1]
+* [Nome completo do aluno 2]
+* [Nome completo do aluno 3]
+* [Nome completo do aluno 4]
+
+## Professores responsáveis
+
+* [Nome completo do professor 1]
+* [Nome completo do professor 2]
+
+## Instruções de utilização
+
+[Assim que a primeira versão do sistema estiver disponível, deverá complementar com as instruções de utilização. Descreva como instalar eventuais dependências e como executar a aplicação.]
+
 # Micromouse
 
 Em Micromouse, você assume o controle de um rato ágil e astuto que se vê em um labirinto repleto de desafios. Inspirado nos clássicos jogos de labirinto como Pac-Man, este jogo coloca você em uma emocionante corrida contra o tempo e os perigos.
-
-
 
 <div ><br>
           <img align="center" height="30" width="40" src="img/cat.jpeg" /> Gato <br><br>
