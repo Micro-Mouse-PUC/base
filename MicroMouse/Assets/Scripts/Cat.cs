@@ -83,37 +83,52 @@ public class Cat : MonoBehaviour
     /// Moves the cat along the current path towards the player.
     /// </summary>
     private void MoveAlongPath()
+{
+    if (currentPath == null || currentPath.Count == 0)
     {
-        if (currentPath == null || currentPath.Count == 0)
-        {
-            Debug.Log("No current path for the cat.");
-            return;
-        }
-
-        if (targetWaypoint >= currentPath.Count)
-        {
-            Debug.Log("Cat has reached the end of the path.");
-            return;
-        }
-
-        // Get the target room's position
-        Vector3 targetPosition = currentPath[targetWaypoint].transform.position;
-        Debug.Log($"Cat moving towards waypoint {targetWaypoint} at position {targetPosition}.");
-
-        // Calculate direction towards the target
-        Vector3 direction = (targetPosition - transform.position).normalized;
-
-        // Set velocity for smooth movement
-        rb.velocity = direction * speed;
-
-        // Check if the cat has reached the target position
-        float distance = Vector3.Distance(transform.position, targetPosition);
-        if (distance < 0.1f)
-        {
-            Debug.Log($"Cat reached waypoint {targetWaypoint}.");
-            targetWaypoint++;
-        }
+        Debug.Log("No current path for the cat.");
+        return;
     }
+
+    if (targetWaypoint >= currentPath.Count)
+    {
+        Debug.Log("Cat has reached the end of the path.");
+        return;
+    }
+
+    // Get the target room's position
+    Vector3 targetPosition = currentPath[targetWaypoint].transform.position;
+    Debug.Log($"Cat moving towards waypoint {targetWaypoint} at position {targetPosition}.");
+
+    // Calculate direction towards the target
+    Vector3 direction = (targetPosition - transform.position).normalized;
+
+    // Raycast to detect walls in front of the cat
+    RaycastHit2D hit = Physics2D.Raycast(transform.position, direction, 1f);
+
+    if (hit.collider != null && hit.collider.CompareTag("Wall"))
+    {
+        // If a wall is detected, adjust the direction slightly to avoid the wall
+        direction += new Vector3(hit.normal.x, hit.normal.y) * 0.1f;  // Modify this value as needed
+    }
+
+    // Smoothly rotate the cat towards the direction it's moving
+    float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
+    Quaternion targetRotation = Quaternion.Euler(new Vector3(0, 0, angle - 90)); // Adjust angle if needed
+    transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, Time.deltaTime * speed);
+
+    // Set velocity for smooth movement
+    rb.velocity = direction.normalized * speed;
+
+    // Check if the cat has reached the target position
+    float distance = Vector3.Distance(transform.position, targetPosition);
+    if (distance < 0.1f)
+    {
+        Debug.Log($"Cat reached waypoint {targetWaypoint}.");
+        targetWaypoint++;
+    }
+}
+
 
     /// <summary>
     /// Coroutine to periodically update the cat's path to the player.
